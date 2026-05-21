@@ -1,8 +1,5 @@
 # FIAP Cloud Games - Microsservico de Usuarios (Fase 4)
 
-![Build & Tests](https://github.com/FIAP-10NETT-Grupo-30/cloud-games-fase-4-users/actions/workflows/build-and-test.yml/badge.svg)
-[![Version](https://img.shields.io/github/v/tag/FIAP-10NETT-Grupo-30/cloud-games-fase-4-users?label=version&sort=semver)](https://github.com/FIAP-10NETT-Grupo-30/cloud-games-fase-4-users/tags)
-
 Microsservico responsavel pelo ciclo de vida de usuarios da plataforma FIAP Cloud Games: cadastro, autenticacao, autorizacao, recuperacao de conta e publicacao de eventos de dominio para os demais servicos em arquitetura orientada a eventos na AWS.
 
 ## Sumario
