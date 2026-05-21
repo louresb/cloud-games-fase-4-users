@@ -8,6 +8,7 @@ metadata:
 data:
   ASPNETCORE_ENVIRONMENT: "Production"
   ASPNETCORE_URLS: "http://+:8080"
+  RUN_DB_MIGRATIONS_ON_STARTUP: "true"
   Queues__Users__Commands: "users.commands"
   Queues__Users__Events: "users.events"
   Queues__Catalog__Commands: "catalog.commands"
@@ -21,3 +22,5 @@ data:
   Jwt__Issuer: "cloud-games"
   Jwt__Audience: "cloud-games-audience"
   Jwt__ExpiryMinutes: "60"
+
+
