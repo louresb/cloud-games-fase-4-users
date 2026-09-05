@@ -4,7 +4,7 @@ Microsservico responsavel pelo ciclo de vida de usuarios da plataforma FIAP Clou
 
 ## Sumario
 
-- [Arquitetura AWS (Fase 4)](#arquitetura-aws-fase-3)
+- [Arquitetura AWS (Fase 4)](#arquitetura-aws-fase-4)
 - [Diagrama de Arquitetura](#diagrama-de-arquitetura)
 - [Fluxo Assincrono](#fluxo-assincrono)
 - [Responsabilidades do Servico](#responsabilidades-do-servico)
@@ -21,15 +21,14 @@ Microsservico responsavel pelo ciclo de vida de usuarios da plataforma FIAP Clou
 
 ## Arquitetura AWS (Fase 4)
 
-A entrega da Fase 4 e executada integralmente em AWS, com deploy de servicos conteinerizados, mensageria assincrona e processamento orientado a eventos.
+A aplicacao e conteinerizada e o pipeline permite publicar a imagem no Amazon ECR e implanta-la no Amazon EKS. A integracao assincrona entre os servicos usa RabbitMQ com MassTransit.
 
 Servicos AWS utilizados:
 
 - Amazon ECR para versionamento e armazenamento de imagens
-- Amazon ECS com Fargate para execucao do microsservico
-- Amazon SQS para filas e intercambio assincrono de mensagens
-- AWS Lambda para processamento de notificacoes orientadas a evento
-- Amazon CloudWatch para logs, metricas e observabilidade operacional
+- Amazon EKS para execucao do microsservico
+- RabbitMQ para filas e intercambio assincrono de mensagens
+- Serilog, Loki e Grafana para logs e observabilidade
 - Terraform (via repositorio de orquestracao) para provisionamento de infraestrutura
 
 ---
@@ -38,13 +37,12 @@ Servicos AWS utilizados:
 
 ```mermaid
 flowchart LR
-    Client[Frontend / Servicos de Dominio] --> ECS[Users Service on ECS Fargate]
-    ECS --> SQL[(SQL Server)]
-    ECS --> SQS_CMD[SQS - users.commands]
-    ECS --> SQS_EVT[SQS - users.events / notifications.events]
-    SQS_EVT --> LAMBDA[AWS Lambda - Notifications Processor]
-    ECS --> CW[Amazon CloudWatch Logs]
-    LAMBDA --> CW
+    Client[Frontend / Servicos de Dominio] --> EKS[Users API on Amazon EKS]
+    EKS --> SQL[(SQL Server)]
+    EKS --> MQ_CMD[RabbitMQ - users.commands]
+    EKS --> MQ_EVT[RabbitMQ - users.events]
+    MQ_EVT --> Notifications[Notifications Worker]
+    EKS --> Logs[Serilog / Loki]
 ```
 
 ---
@@ -54,17 +52,16 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant Client as Cliente / Servico Integrador
-    participant SQSCommands as SQS users.commands
+    participant Commands as RabbitMQ users.commands
     participant Users as Users Service
-    participant SQSEvents as SQS users.events / notifications.events
-    participant Lambda as AWS Lambda Notifications
+    participant Events as RabbitMQ users.events
+    participant Notifications as Notifications Worker
 
-    Client->>SQSCommands: Publish Event (UserCommand)
-    Users->>SQSCommands: Consume Message
+    Client->>Commands: Publish Event (UserCommand)
+    Users->>Commands: Consume Message
     Users->>Users: Process Event (apply user workflow)
-    Users->>SQSEvents: Publish Event (UserDomainEvent)
-    Lambda->>SQSEvents: Consume Message
-    Lambda->>Lambda: Process Event (notification workflow)
+    Users->>Events: Publish Event (UserDomainEvent)
+    Events->>Notifications: Consume Message
 ```
 
 ---
@@ -76,7 +73,7 @@ sequenceDiagram
 - Autorizar acesso por role (Administrator/User)
 - Processar confirmacao de email, primeiro acesso e recuperacao de senha
 - Gerenciar operacoes administrativas de usuarios
-- Publicar eventos de dominio em filas SQS para integracao com outros servicos
+- Publicar eventos de dominio via RabbitMQ para integracao com outros servicos
 - Expor endpoints HTTP para operacoes sincronas de usuarios
 
 Eventos de dominio publicados:
@@ -98,11 +95,11 @@ Eventos de dominio publicados:
 sequenceDiagram
     participant Client as Cliente
     participant Users as Users Service
-    participant SQSEvents as SQS users.events / notifications.events
+    participant Events as RabbitMQ users.events
 
     Client->>Users: POST /api/Users/register
     Users->>Users: Process Event (create user + confirmation token)
-    Users->>SQSEvents: Publish Event (UserSignedUpEvent)
+    Users->>Events: Publish Event (UserSignedUpEvent)
 ```
 
 Entrada:
@@ -123,11 +120,11 @@ Saida:
 sequenceDiagram
     participant User as Usuario
     participant Users as Users Service
-    participant SQSEvents as SQS users.events / notifications.events
+    participant Events as RabbitMQ users.events
 
     User->>Users: POST /api/Users/confirm
     Users->>Users: Process Event (validate confirmation token)
-    Users->>SQSEvents: Publish Event (UserEmailConfirmedEvent)
+    Users->>Events: Publish Event (UserEmailConfirmedEvent)
 ```
 
 Entrada:
@@ -147,14 +144,14 @@ Saida:
 ```mermaid
 sequenceDiagram
     participant Catalog as Catalog Service
-    participant SQSCommands as SQS users.commands
+    participant Commands as RabbitMQ users.commands
     participant Users as Users Service
-    participant SQSEvents as SQS users.events / notifications.events
+    participant Events as RabbitMQ users.events
 
-    Catalog->>SQSCommands: Publish Event (UserCommand)
-    Users->>SQSCommands: Consume Message
+    Catalog->>Commands: Publish Event (UserCommand)
+    Users->>Commands: Consume Message
     Users->>Users: Process Event (command handler)
-    Users->>SQSEvents: Publish Event (UserDomainEvent)
+    Users->>Events: Publish Event (UserDomainEvent)
 ```
 
 Entrada:
@@ -185,7 +182,7 @@ Saida:
 1. Clonar o repositorio
 
    ```bash
-   git clone https://github.com/FIAP-10NETT-Grupo-30/cloud-games-fase-4-users.git
+   git clone https://github.com/louresb/cloud-games-fase-4-users.git
    cd cloud-games-fase-4-users
    ```
 
@@ -212,9 +209,9 @@ Saida:
    dotnet user-secrets set "Queues:Users:Events" "users.events"
    dotnet user-secrets set "Queues:Notifications:Events" "notifications.events"
 
-   dotnet user-secrets set "AWS:Region" "us-east-1"
-   dotnet user-secrets set "AWS:AccessKeyId" "your-local-access-key"
-   dotnet user-secrets set "AWS:SecretAccessKey" "your-local-secret-key"
+   dotnet user-secrets set "RabbitMq:HostName" "localhost"
+   dotnet user-secrets set "RabbitMq:UserName" "guest"
+   dotnet user-secrets set "RabbitMq:Password" "guest"
 
    dotnet user-secrets set "AdminUser:Email" "admin@dev.local"
    dotnet user-secrets set "AdminUser:Password" "<set-admin-password>"
@@ -250,7 +247,7 @@ Saida:
 
 Provisionamento, pipelines e infraestrutura de execucao em AWS estao centralizados no repositorio de orquestracao:
 
-- https://github.com/FIAP-10NETT-Grupo-30/cloud-games-fase-4-orchestration-aws
+- https://github.com/louresb/cloud-games-fase-4-orchestration-aws
 
 ---
 
@@ -308,12 +305,10 @@ Camadas:
 
 - .NET 10 / ASP.NET Core
 - Entity Framework Core (SQL Server)
-- AWS SDK for .NET (SQS)
-- AWS Lambda (.NET)
-- Amazon ECS Fargate
+- RabbitMQ / MassTransit
+- Amazon EKS
 - Amazon ECR
-- Amazon SQS
-- Amazon CloudWatch
+- Loki / Grafana
 - Terraform (repositorio de orquestracao)
 - Swagger / OpenAPI
 - Serilog
@@ -336,9 +331,9 @@ Camadas:
 | Queues__Users__Commands | Nome da fila de comandos de usuarios | users.commands |
 | Queues__Users__Events | Nome da fila de eventos de usuarios | users.events |
 | Queues__Notifications__Events | Nome da fila de eventos de notificacoes | notifications.events |
-| AWS__Region | Regiao AWS utilizada pelo servico | us-east-1 |
-| AWS__AccessKeyId | Credencial AWS para execucao local | your-local-access-key |
-| AWS__SecretAccessKey | Credencial AWS secreta para execucao local | your-local-secret-key |
+| RabbitMq__HostName | Host do RabbitMQ | localhost |
+| RabbitMq__UserName | Usuario do RabbitMQ | guest |
+| RabbitMq__Password | Senha do RabbitMQ | guest |
 | AdminUser__Email | Email do usuario administrador seed | admin@dev.local |
 | AdminUser__Password | Senha do usuario administrador seed | <set-admin-password> |
 | AdminUser__Name | Nome do usuario administrador seed | Administrador |
@@ -350,8 +345,9 @@ Camadas:
 
 ## Repositorios Relacionados
 
-- Orquestracao AWS: https://github.com/FIAP-10NETT-Grupo-30/cloud-games-fase-4-orchestration-aws
-- Usuarios: https://github.com/FIAP-10NETT-Grupo-30/cloud-games-fase-4-users
-- Catalogo: https://github.com/FIAP-10NETT-Grupo-30/cloud-games-fase-4-catalog
-- Pagamentos: https://github.com/FIAP-10NETT-Grupo-30/cloud-games-fase-4-payments
-- Notificacoes: https://github.com/FIAP-10NETT-Grupo-30/cloud-games-fase-4-notifications
+- Orquestracao AWS: https://github.com/louresb/cloud-games-fase-4-orchestration-aws
+- Usuarios: https://github.com/louresb/cloud-games-fase-4-users
+- Catalogo: https://github.com/louresb/cloud-games-fase-4-catalog
+- Pagamentos: https://github.com/louresb/cloud-games-fase-4-payments
+- Notificacoes: https://github.com/louresb/cloud-games-fase-4-notifications
+- Auditoria: https://github.com/louresb/cloud-games-fase-4-audit
